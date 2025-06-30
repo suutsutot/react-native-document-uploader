@@ -30,10 +30,12 @@ RCT_EXPORT_METHOD(pick:(RCTPromiseResolveBlock)resolve
             picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeData]];
         } else {
             // Fallback for iOS 13 and earlier
-            picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.data"] inMode:UIDocumentPickerModeOpen];
+            picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.data"]
+                                                                            inMode:UIDocumentPickerModeImport];
         }
-        
+
         picker.delegate = self;
+        picker.modalPresentationStyle = UIModalPresentationFormSheet;
         [rootVC presentViewController:picker animated:YES completion:nil];
     });
 }
@@ -57,29 +59,41 @@ RCT_EXPORT_METHOD(pick:(RCTPromiseResolveBlock)resolve
         }
         return;
     }
-    
-    NSError *error;
-    NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:url.path error:&error];
+
+    NSURL *tempDir = [NSURL fileURLWithPath:NSTemporaryDirectory() isDirectory:YES];
+    NSURL *targetURL = [tempDir URLByAppendingPathComponent:url.lastPathComponent];
+
+    NSError *copyError = nil;
+    [[NSFileManager defaultManager] copyItemAtURL:url toURL:targetURL error:&copyError];
 
     [url stopAccessingSecurityScopedResource];
-    
-    if (error) {
+
+    if (copyError) {
         if (self.rejecter) {
-            self.rejecter(@"READ_ERROR", @"Could not read file", error);
+            self.rejecter(@"COPY_ERROR", @"Could not copy file to temporary location", copyError);
+        }
+        return;
+    }
+
+    NSError *attrError = nil;
+    NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:targetURL.path error:&attrError];
+
+    if (attrError) {
+        if (self.rejecter) {
+            self.rejecter(@"ATTR_ERROR", @"Could not read file attributes", attrError);
         }
         return;
     }
     
     NSNumber *size = attributes[NSFileSize] ?: @0;
-    
+
     NSDictionary *result = @{
-        @"uri": url.absoluteString,
-        @"name": url.lastPathComponent,
-        @"type": url.pathExtension,
+        @"uri": targetURL.absoluteString,
+        @"name": targetURL.lastPathComponent,
+        @"type": targetURL.pathExtension,
         @"size": size
     };
-    
-     NSLog(@"[DocumentUploader] Returning file info: %@", result);
+
     if (self.resolver) {
         self.resolver(result);
     }
