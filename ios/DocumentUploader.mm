@@ -21,15 +21,14 @@ RCT_EXPORT_METHOD(pick:(RCTPromiseResolveBlock)resolve
             reject(@"NO_ROOT", @"No root view controller", nil);
             return;
         }
-        
+
         self.resolver = resolve;
         self.rejecter = reject;
-        
+
         UIDocumentPickerViewController *picker;
         if (@available(iOS 14.0, *)) {
             picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeData]];
         } else {
-            // Fallback for iOS 13 and earlier
             picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.data"]
                                                                             inMode:UIDocumentPickerModeImport];
         }
@@ -48,6 +47,8 @@ RCT_EXPORT_METHOD(pick:(RCTPromiseResolveBlock)resolve
     if (!url) {
         if (self.resolver) {
             self.resolver([NSNull null]);
+            self.resolver = nil;
+            self.rejecter = nil;
         }
         return;
     }
@@ -56,6 +57,8 @@ RCT_EXPORT_METHOD(pick:(RCTPromiseResolveBlock)resolve
     if (!accessGranted) {
         if (self.rejecter) {
             self.rejecter(@"ACCESS_DENIED", @"Could not access file", nil);
+            self.resolver = nil;
+            self.rejecter = nil;
         }
         return;
     }
@@ -63,28 +66,43 @@ RCT_EXPORT_METHOD(pick:(RCTPromiseResolveBlock)resolve
     NSURL *tempDir = [NSURL fileURLWithPath:NSTemporaryDirectory() isDirectory:YES];
     NSURL *targetURL = [tempDir URLByAppendingPathComponent:url.lastPathComponent];
 
+    if ([[NSFileManager defaultManager] fileExistsAtPath:targetURL.path]) {
+        NSError *removeError = nil;
+        [[NSFileManager defaultManager] removeItemAtURL:targetURL error:&removeError];
+        if (removeError) {
+            if (self.rejecter) {
+                self.rejecter(@"REMOVE_ERROR", @"Failed to remove existing file in temp directory", removeError);
+                self.resolver = nil;
+                self.rejecter = nil;
+            }
+            return;
+        }
+    }
+
     NSError *copyError = nil;
     [[NSFileManager defaultManager] copyItemAtURL:url toURL:targetURL error:&copyError];
-
     [url stopAccessingSecurityScopedResource];
 
     if (copyError) {
         if (self.rejecter) {
             self.rejecter(@"COPY_ERROR", @"Could not copy file to temporary location", copyError);
+            self.resolver = nil;
+            self.rejecter = nil;
         }
         return;
     }
 
     NSError *attrError = nil;
     NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:targetURL.path error:&attrError];
-
     if (attrError) {
         if (self.rejecter) {
             self.rejecter(@"ATTR_ERROR", @"Could not read file attributes", attrError);
+            self.resolver = nil;
+            self.rejecter = nil;
         }
         return;
     }
-    
+
     NSNumber *size = attributes[NSFileSize] ?: @0;
 
     NSDictionary *result = @{
@@ -96,12 +114,16 @@ RCT_EXPORT_METHOD(pick:(RCTPromiseResolveBlock)resolve
 
     if (self.resolver) {
         self.resolver(result);
+        self.resolver = nil;
+        self.rejecter = nil;
     }
 }
 
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
     if (self.resolver) {
         self.resolver([NSNull null]);
+        self.resolver = nil;
+        self.rejecter = nil;
     }
 }
 
