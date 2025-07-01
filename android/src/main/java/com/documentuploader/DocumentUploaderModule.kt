@@ -5,12 +5,15 @@ import android.content.Intent
 import android.database.Cursor
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.net.Uri
 import android.provider.OpenableColumns
+import androidx.exifinterface.media.ExifInterface
 import com.facebook.react.bridge.*
 import com.facebook.react.module.annotations.ReactModule
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStream
 
 @ReactModule(name = DocumentUploaderModule.NAME)
 class DocumentUploaderModule(reactContext: ReactApplicationContext) :
@@ -81,26 +84,30 @@ class DocumentUploaderModule(reactContext: ReactApplicationContext) :
 
     if (mimeType == "image/heic" || mimeType == "image/heif" || name.endsWith(".heic", true)) {
       try {
-        val inputStream = contentResolver.openInputStream(uri)
-        val bitmap = BitmapFactory.decodeStream(inputStream)
+        val tempHeicFile = File.createTempFile("heic_tmp", null, reactApplicationContext.cacheDir)
+        val inputStream: InputStream? = contentResolver.openInputStream(uri)
+        val outputStream = FileOutputStream(tempHeicFile)
+        inputStream?.copyTo(outputStream)
         inputStream?.close()
+        outputStream.close()
 
-        if (bitmap != null) {
-          val jpgFile = File(reactApplicationContext.cacheDir, "${System.currentTimeMillis()}.jpg")
-          val outputStream = FileOutputStream(jpgFile)
-          bitmap.compress(Bitmap.CompressFormat.JPEG, 100, outputStream)
-          outputStream.flush()
-          outputStream.close()
+        val exif = ExifInterface(tempHeicFile.absolutePath)
+        val orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
 
-          finalUri = Uri.fromFile(jpgFile)
-          finalName = jpgFile.name
-          finalMime = "image/jpeg"
-          finalSize = jpgFile.length()
-        } else {
-          pickerPromise?.reject("CONVERT_ERROR", "Failed to decode HEIC image")
-          pickerPromise = null
-          return
-        }
+        val bitmap = BitmapFactory.decodeFile(tempHeicFile.absolutePath)
+        val rotatedBitmap = applyExifOrientation(bitmap, orientation)
+
+        val jpgFile = File(reactApplicationContext.cacheDir, "${System.currentTimeMillis()}.jpg")
+        val jpgOutput = FileOutputStream(jpgFile)
+        rotatedBitmap.compress(Bitmap.CompressFormat.JPEG, 100, jpgOutput)
+        jpgOutput.flush()
+        jpgOutput.close()
+
+        finalUri = Uri.fromFile(jpgFile)
+        finalName = jpgFile.name
+        finalMime = "image/jpeg"
+        finalSize = jpgFile.length()
+
       } catch (e: Exception) {
         pickerPromise?.reject("CONVERT_EXCEPTION", "HEIC to JPG conversion failed", e)
         pickerPromise = null
@@ -120,6 +127,27 @@ class DocumentUploaderModule(reactContext: ReactApplicationContext) :
   }
 
   override fun onNewIntent(intent: Intent?) {
-    // Not needed
+    // not used
+  }
+
+  private fun applyExifOrientation(bitmap: Bitmap, orientation: Int): Bitmap {
+    val matrix = Matrix()
+    when (orientation) {
+      ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+      ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+      ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+      ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.preScale(-1f, 1f)
+      ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.preScale(1f, -1f)
+      ExifInterface.ORIENTATION_TRANSPOSE -> {
+        matrix.postRotate(90f)
+        matrix.preScale(-1f, 1f)
+      }
+      ExifInterface.ORIENTATION_TRANSVERSE -> {
+        matrix.postRotate(270f)
+        matrix.preScale(-1f, 1f)
+      }
+      else -> return bitmap
+    }
+    return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
   }
 }

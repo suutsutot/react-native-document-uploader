@@ -1,5 +1,12 @@
 import { useState } from 'react';
-import { Text, View, StyleSheet, Button, useColorScheme } from 'react-native';
+import {
+  Text,
+  View,
+  StyleSheet,
+  Button,
+  useColorScheme,
+  Image,
+} from 'react-native';
 import { pick, PickedFile } from 'react-native-document-uploader';
 
 export default function App() {
@@ -31,6 +38,13 @@ export default function App() {
           <Text style={{ color: textColor }}>Type: {file.type}</Text>
           <Text style={{ color: textColor }}>Size: {file.size}</Text>
         </>
+      )}
+
+      {file?.type.indexOf('image/') !== -1 && (
+        <Image
+          style={{ width: 200, height: 200 }}
+          source={{ uri: file?.uri }}
+        />
       )}
     </View>
   );
