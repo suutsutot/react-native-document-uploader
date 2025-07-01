@@ -63,37 +63,58 @@ RCT_EXPORT_METHOD(pick:(RCTPromiseResolveBlock)resolve
         return;
     }
 
-    NSURL *tempDir = [NSURL fileURLWithPath:NSTemporaryDirectory() isDirectory:YES];
-    NSURL *targetURL = [tempDir URLByAppendingPathComponent:url.lastPathComponent];
+    NSString *ext = url.pathExtension.lowercaseString;
 
-    if ([[NSFileManager defaultManager] fileExistsAtPath:targetURL.path]) {
-        NSError *removeError = nil;
-        [[NSFileManager defaultManager] removeItemAtURL:targetURL error:&removeError];
-        if (removeError) {
+    NSURL *outputURL = nil;
+
+    if ([ext isEqualToString:@"heic"]) {
+        NSData *imageData = [NSData dataWithContentsOfURL:url];
+        UIImage *image = [UIImage imageWithData:imageData];
+
+        if (!image) {
+            [url stopAccessingSecurityScopedResource];
             if (self.rejecter) {
-                self.rejecter(@"REMOVE_ERROR", @"Failed to remove existing file in temp directory", removeError);
+                self.rejecter(@"HEIC_DECODE_ERROR", @"Could not decode HEIC image", nil);
                 self.resolver = nil;
                 self.rejecter = nil;
             }
             return;
         }
-    }
 
-    NSError *copyError = nil;
-    [[NSFileManager defaultManager] copyItemAtURL:url toURL:targetURL error:&copyError];
-    [url stopAccessingSecurityScopedResource];
-
-    if (copyError) {
-        if (self.rejecter) {
-            self.rejecter(@"COPY_ERROR", @"Could not copy file to temporary location", copyError);
-            self.resolver = nil;
-            self.rejecter = nil;
+        NSData *jpegData = UIImageJPEGRepresentation(image, 1.0);
+        if (!jpegData) {
+            [url stopAccessingSecurityScopedResource];
+            if (self.rejecter) {
+                self.rejecter(@"JPEG_ENCODE_ERROR", @"Failed to encode JPEG", nil);
+                self.resolver = nil;
+                self.rejecter = nil;
+            }
+            return;
         }
-        return;
+
+        NSString *filename = [[url.lastPathComponent stringByDeletingPathExtension] stringByAppendingPathExtension:@"jpg"];
+        NSURL *tempURL = [[NSURL fileURLWithPath:NSTemporaryDirectory()] URLByAppendingPathComponent:filename];
+
+        [jpegData writeToURL:tempURL atomically:YES];
+
+        outputURL = tempURL;
+
+        [url stopAccessingSecurityScopedResource];
+
+    } else {
+        NSURL *tempDir = [NSURL fileURLWithPath:NSTemporaryDirectory() isDirectory:YES];
+        outputURL = [tempDir URLByAppendingPathComponent:url.lastPathComponent];
+
+        if ([[NSFileManager defaultManager] fileExistsAtPath:outputURL.path]) {
+            [[NSFileManager defaultManager] removeItemAtURL:outputURL error:nil];
+        }
+
+        [[NSFileManager defaultManager] copyItemAtURL:url toURL:outputURL error:nil];
+        [url stopAccessingSecurityScopedResource];
     }
 
     NSError *attrError = nil;
-    NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:targetURL.path error:&attrError];
+    NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:outputURL.path error:&attrError];
     if (attrError) {
         if (self.rejecter) {
             self.rejecter(@"ATTR_ERROR", @"Could not read file attributes", attrError);
@@ -106,9 +127,9 @@ RCT_EXPORT_METHOD(pick:(RCTPromiseResolveBlock)resolve
     NSNumber *size = attributes[NSFileSize] ?: @0;
 
     NSDictionary *result = @{
-        @"uri": targetURL.absoluteString,
-        @"name": targetURL.lastPathComponent,
-        @"type": targetURL.pathExtension,
+        @"uri": outputURL.absoluteString,
+        @"name": outputURL.lastPathComponent,
+        @"type": outputURL.pathExtension,
         @"size": size
     };
 
