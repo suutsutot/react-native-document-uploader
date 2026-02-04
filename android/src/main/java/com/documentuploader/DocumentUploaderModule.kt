@@ -126,7 +126,7 @@ class DocumentUploaderModule(reactContext: ReactApplicationContext) :
     pickerPromise = null
   }
 
-  override fun onNewIntent(intent: Intent?) {
+  override fun onNewIntent(intent: Intent) {
     // not used
   }
 
