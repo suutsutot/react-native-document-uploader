@@ -35,7 +35,7 @@ class DocumentUploaderModule(reactContext: ReactApplicationContext) :
   }
 
   override fun pick(promise: Promise) {
-    val activity = currentActivity
+    val activity = reactApplicationContext.currentActivity
     if (activity == null) {
       promise.reject("NO_ACTIVITY", "No current activity")
       return
